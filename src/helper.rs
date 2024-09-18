@@ -38,12 +38,10 @@ pub fn count_entries(path: &Path) -> pak::Result<u64> {
     Ok(entry_count)
 }
 
-// ? IDK what this means ?
-// ? IDEA set max thread to 8. recursively check for folders, select the 8 most top folders
-// ? and make threads for them. flag does folders so that other threads don't touch them.
 pub fn remove_recursively_multi_thread(
     path: &Path,
     deleted_entries: Arc<Mutex<u64>>,
+    thread_limit: Arc<Mutex<u8>>,
 ) -> pak::Result<()> {
     let entries = read_dir(path)?;
     let mut thread_handles = Vec::new();
@@ -51,9 +49,16 @@ pub fn remove_recursively_multi_thread(
         let entry = entry.unwrap().path();
         if entry.is_dir() && !entry.is_symlink() {
             let deleted_entries = deleted_entries.clone();
-            let thread_handle =
-                thread::spawn(move || remove_recursively_multi_thread(&entry, deleted_entries));
-            thread_handles.push(thread_handle);
+            let thread_limit = thread_limit.clone();
+            if *thread_limit.lock().unwrap() == 0 {
+                remove_recursively_multi_thread(&entry, deleted_entries, thread_limit);
+            } else {
+                *thread_limit.lock().unwrap() -= 1;
+                let thread_handle = thread::spawn(move || {
+                    remove_recursively_multi_thread(&entry, deleted_entries, thread_limit)
+                });
+                thread_handles.push(thread_handle);
+            }
         } else {
             remove_file(&entry)?;
             *deleted_entries.lock().unwrap() += 1;
@@ -61,6 +66,7 @@ pub fn remove_recursively_multi_thread(
     }
     for thread_handle in thread_handles {
         thread_handle.join().unwrap()?;
+        *thread_limit.lock().unwrap() += 1;
         *deleted_entries.lock().unwrap() += 1;
     }
     remove_dir(path)?;

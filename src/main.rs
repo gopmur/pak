@@ -35,7 +35,8 @@ fn pak_kon(args: Arguments) -> pak::Result<()> {
         remove_recursively_single_thread(&path, deleted_entries)?;
     }
     else if recursive {
-        remove_recursively_multi_thread(&path, deleted_entries)?;
+        let thread_limit = Arc::new(Mutex::new(16));
+        remove_recursively_multi_thread(&path, deleted_entries, thread_limit)?;
     }
     else {
         remove_single_file(&path, deleted_entries)?;
